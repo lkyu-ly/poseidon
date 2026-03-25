@@ -1,0 +1,13 @@
+# Install the matching Paddle distribution for your target device/runtime first.
+# The current verified environment uses:
+# paddlepaddle-gpu==3.3.0
+# If you run on CPU or a Paddle custom device build, replace the line above with
+# the corresponding Paddle package provided by your runtime.
+
+h5py
+matplotlib
+numpy
+pandas
+psutil
+PyYAML
+wandb
