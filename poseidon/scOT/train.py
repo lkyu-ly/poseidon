@@ -192,6 +192,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Set this if you have to replace the embeddings and recovery layers because you are not just using the density, velocity and pressure channels. Only relevant for finetuning.",
     )
+    parser.add_argument(
+        "--debug_initial_state_path",
+        type=str,
+        default=None,
+        help="Debug-only path to a Torch state_dict used for loss alignment.",
+    )
+    parser.add_argument(
+        "--debug_batch_order_path",
+        type=str,
+        default=None,
+        help="Debug-only path to a JSON file with epoch_batches for loss alignment.",
+    )
     params = read_cli(parser).parse_args()
     run, config, ckpt_dir, RANK, CPU_CORES = setup(params)
 
@@ -302,8 +314,7 @@ if __name__ == "__main__":
         lr_scheduler_type=config["lr_scheduler"],
         warmup_ratio=config["warmup_ratio"],
         log_level="passive",
-        logging_strategy="steps",
-        logging_steps=5,
+        logging_strategy="epoch",
         logging_nan_inf_filter=False,
         save_strategy="epoch",
         save_total_limit=1,
@@ -320,6 +331,7 @@ if __name__ == "__main__":
         torch_compile=False,
         report_to="wandb",
         run_name=params.wandb_run_name,
+        debug_batch_order_path=params.debug_batch_order_path,
     )
 
     early_stopping = EarlyStoppingCallback(
@@ -333,6 +345,11 @@ if __name__ == "__main__":
         )
     else:
         model = ScOT(model_config)
+
+    if params.debug_initial_state_path is not None:
+        model.load_state_dict(
+            torch.load(params.debug_initial_state_path, map_location="cpu")
+        )
     num_params = get_num_parameters(model)
     config["num_params"] = num_params
     num_params_no_embed = get_num_parameters_no_embed(model)

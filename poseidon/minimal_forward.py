@@ -51,6 +51,7 @@ def main() -> None:
     print(f"output_shape: {tuple(prediction.shape)}")
     print("output_sample:")
     print(prediction[0, 0, :4, :4].cpu())
+    # print(prediction.cpu())
 
 
 if __name__ == "__main__":

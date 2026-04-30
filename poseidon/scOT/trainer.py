@@ -221,6 +221,7 @@ Copyright 2018- The Hugging Face team. All rights reserved.
    limitations under the License.
 """
 
+import json
 import torch
 from torch import nn
 from typing import List, Optional, Dict, Tuple, Union, Any
@@ -244,6 +245,13 @@ class TrainingArguments(TrainingArguments_):
         default=None,
         metadata={
             "help": "The initial learning rate for the time embedding. When not provided, falls back to `learning_rate`. Only used when embedding and recovery are also fine-tuned with different lr."
+        },
+    )
+
+    debug_batch_order_path: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Debug-only path to a JSON file with epoch_batches for deterministic loss alignment."
         },
     )
 
@@ -272,11 +280,49 @@ class TrainingArguments(TrainingArguments_):
         return self
 
 
+class DebugEpochBatchSampler(torch.utils.data.Sampler):
+    def __init__(self, epoch_batches: List[List[List[int]]]):
+        if len(epoch_batches) == 0:
+            raise ValueError("debug epoch batch order must contain at least one epoch")
+        self.epoch_batches = epoch_batches
+        self.epoch = 0
+        self.length = sum(len(batch) for batch in epoch_batches[0])
+
+    @classmethod
+    def from_json(cls, path: str):
+        with open(path, "r", encoding="utf-8") as stream:
+            payload = json.load(stream)
+        epoch_batches = payload.get("epoch_batches")
+        if epoch_batches is None:
+            epoch_batches = [payload["batches"]]
+        return cls(epoch_batches)
+
+    def __iter__(self):
+        batches = self.epoch_batches[self.epoch % len(self.epoch_batches)]
+        self.epoch += 1
+        for batch in batches:
+            for index in batch:
+                yield int(index)
+
+    def __len__(self):
+        return self.length
+
+
 class Trainer(Trainer_):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ar_steps = None
         self.output_all_steps = False
+        self.debug_train_sampler = (
+            DebugEpochBatchSampler.from_json(self.args.debug_batch_order_path)
+            if getattr(self.args, "debug_batch_order_path", None)
+            else None
+        )
+
+    def _get_train_sampler(self):
+        if self.debug_train_sampler is not None:
+            return self.debug_train_sampler
+        return super()._get_train_sampler()
 
     def get_decay_parameter_names(self, model) -> List[str]:
         ALL_LAYERNORM_LAYERS = [torch.nn.LayerNorm, LayerNorm, ConditionalLayerNorm]

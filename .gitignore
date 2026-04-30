@@ -168,3 +168,6 @@ test/
 models/
 .claude/
 dataset/
+.codex
+docs/
+tools/
