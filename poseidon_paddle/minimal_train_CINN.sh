@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 打开组合算子
-export FLAGS_prim_enable_dynamic=true && export FLAGS_prim_all=true
-
-# 打开 CINN 编译器
-export FLAGS_use_cinn=true
-
-# 是否打印 Program IR 信息 (用于调试)
-export FLAGS_print_ir=false
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+# 单一开关：train.py 据此在 import paddle 之前设 CINN FLAGS 并对 model 做 to_static。
+export POSEIDON_USE_CINN=1
 
 export WANDB_MODE=disabled
 export PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"

@@ -38,3 +38,15 @@
   根因: Paddle 的 `paddle.nn.functional.normalize` backward 对 L2 范数为零的 token 会产生极大梯度值（除以接近零的范数），在 float32 下溢出为 NaN/Inf。Airfoil 等数据集有大量 padding token（~94%），patch embedding + LayerNorm 后这些 token 的范数恰好为零。
 
   修复方案: 在 Swinv2SelfAttention.forward() 中对 query_layer 和 key_layer 各加 `_NORM_STABILITY_EPS = 1e-6` 后再做 normalize，避免零范数触发梯度溢出。对非零 token 的影响可忽略不计（1e-6 相对于通常 1~10 的范数值）。
+- CINN 动转静训练开关 (poseidon_paddle/scOT/train.py, minimal_train_CINN.sh)
+  背景: Paddle CINN 必须在 paddle.jit.to_static 之后才实质编译训练图，仅设 FLAGS_use_cinn=true 不做 to_static 则 CINN 不生效。
+  修复: 新增单一环境变量 POSEIDON_USE_CINN，在 train.py 的 import paddle 之前据此设三个 FLAGS（prim_enable_dynamic/prim_all/use_cinn），并在模型构建后对 model 做 paddle.jit.to_static(model, full_graph=True)；开关关时不 to_static + FLAGS 全 false，回到原纯动态图。to_static 与 CINN 在 Paddle 3.3 绑定（踩坑手册坑四），故用同一开关，避免双开关死代码。minimal_train_CINN.sh 改为只 export POSEIDON_USE_CINN=1。
+- CINN 训练 DataLoader drop_last (poseidon_paddle/scOT/trainer.py)
+  根因: to_static 下 batch 维度被烘焙为静态值，末 batch 维度变化触发 retrace + CINN 重编译（~100s/次），CINN 无法稳定生效。
+  修复: _create_dataloader 新增 drop_last 参数；CINN 模式训练 drop_last=True 保证 batch 维度稳定（eval/predict 不变）。
+- to_static + dataclass 返回 PIR Value 修复 (poseidon_paddle/scOT/trainer.py)
+  根因: paddle.jit.to_static(full_graph=True) 走 AST 路径，输出恢复只递归 tuple/list/dict，普通 dataclass（ScOTOutput）被当标量，内部 pir.Value 不被注册为 Program 输出而原样泄漏，导致 loss 不能 .backward()/.numpy()。
+  修复: _model_forward 在 CINN 模式用 model(**inputs, return_dict=False) 拿 eager tuple（Paddle 正确恢复 tuple 内 Value 为 eager Tensor），图外再包装为 ScOTOutput，保持 Trainer 接口不变。详见 docs/cinn_to_static_root_cause_report.md。
+- attn_mask_cache 跨 Program 缓存 pir.Value 修复 (poseidon_paddle/scOT/model.py)
+  根因: ScOTLayer.get_attn_mask 的 attn_mask_cache 无条件缓存 attn_mask，cache_key 只含 shape/window/dtype、不含 Program 身份。to_static 按 train/eval 分别构建 Program，train trace 缓存的 pir.Value 被 eval trace 命中后接入 eval Program，clone eval Program 时 IRMapping 找不到该外部 Value 定义而崩溃（Not found key in IRMapping）。动态图单 Program 下缓存正常，故历史无此问题。
+  修复: get_attn_mask 仅在 paddle.in_dynamic_mode() 时读写缓存；静态 trace 各 Program 自己计算 mask，避免跨 Program Value 污染。动态图原缓存收益保留。
