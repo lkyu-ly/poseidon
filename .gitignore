@@ -171,3 +171,5 @@ dataset/
 .codex
 docs/
 tools/
+
+!_ppcfd_test_logs/*
